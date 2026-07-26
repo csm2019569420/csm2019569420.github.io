@@ -3,10 +3,11 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>4倍图片清晰化工具</title>
+    <title>4倍图片清晰化</title>
     <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
     <script>eruda.init();</script>
     <style>
+        /* 样式同上，此处省略以节省空间，但完整替换时需保留 */
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -113,7 +114,7 @@
 <body>
 <div class="container">
     <h1>✨ 4倍图片清晰化</h1>
-    <p class="sub">基于 AI 的超分辨率增强 · 4x 放大（手机优化版）</p>
+    <p class="sub">AI 超分 · 4x 放大（不分块，更稳定）</p>
     <div class="upload-area" id="uploadArea">
         <span class="icon">🖼️</span>
         <p><strong>点击选择图片</strong></p>
@@ -136,11 +137,9 @@
     <div class="footer">模型在线加载 · 首次约15-30秒</div>
 </div>
 
-<!-- 1. TensorFlow.js 核心库 -->
+<!-- 依赖库 -->
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
-<!-- 2. ESRGAN Slim 4x 模型 (通过 script 标签加载, 会暴露全局对象 ESRGANSlim4x) -->
 <script src="https://cdn.jsdelivr.net/npm/@upscalerjs/esrgan-slim@latest/dist/umd/4x.min.js"></script>
-<!-- 3. UpscalerJS 核心库 -->
 <script src="https://cdn.jsdelivr.net/npm/upscaler@latest/dist/browser/umd/upscaler.min.js"></script>
 
 <script>
@@ -172,8 +171,8 @@
             setProgress(0);
         }
 
-        // ===== 4倍模型下，压缩到 800px 以确保最终尺寸 (800*4=3200) 不超 GPU 限制 =====
-        function compressImage(file, maxSize = 800) {
+        // ===== 压缩阈值降到 600px =====
+        function compressImage(file, maxSize = 600) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onload = (e) => {
@@ -215,11 +214,11 @@
             if (!file) return;
             try {
                 setStatus('正在压缩图片...');
-                const compressedFile = await compressImage(file, 800);
+                const compressedFile = await compressImage(file, 600);
                 if (compressedFile !== file) {
-                    setStatus('✅ 图片已压缩至800px以内 (4x安全)');
+                    setStatus('✅ 图片已压缩至600px以内 (4x安全)');
                 } else {
-                    setStatus('图片尺寸小于800px，可直接4x放大');
+                    setStatus('图片尺寸小于600px，可直接4x放大');
                 }
                 if (originalUrl) URL.revokeObjectURL(originalUrl);
                 currentFile = compressedFile;
@@ -230,7 +229,7 @@
                 upscaleBtn.disabled = false;
                 setStatus('已加载: ' + file.name);
             } catch (err) {
-                console.error('压缩异常完整信息：', err);
+                console.error('压缩异常:', err);
                 setStatus('压缩失败: ' + (err.message || String(err)), true);
             }
         });
@@ -241,7 +240,6 @@
                 setStatus('错误：UpscalerJS 库未加载', true);
                 return;
             }
-            // 检查 4x 模型是否加载成功 (ESRGANSlim4x)
             if (typeof ESRGANSlim4x === 'undefined') {
                 setStatus('错误：4x模型未加载，请刷新重试', true);
                 return;
@@ -250,7 +248,7 @@
             downloadBtn.disabled = true;
             progressWrap.style.display = 'block';
             setProgress(0);
-            setStatus('正在加载4x模型并增强（手机GPU加速）...');
+            setStatus('正在加载4x模型并增强（整图处理）...');
 
             try {
                 const imgDataUrl = await new Promise((resolve, reject) => {
@@ -260,9 +258,8 @@
                     reader.readAsDataURL(currentFile);
                 });
 
-                // ===== 关键改动：使用 ESRGAN Slim 4x 模型 =====
                 const upscaler = new Upscaler({
-                    model: ESRGANSlim4x // 直接使用 script 标签加载好的 4x 模型对象[reference:10]
+                    model: ESRGANSlim4x
                 });
 
                 let progressValue = 0;
@@ -272,9 +269,8 @@
                     setProgress(progressValue);
                 }, 200);
 
+                // ===== 关键改动：去掉 patchSize 和 padding，整图处理 =====
                 const upscaledDataUrl = await upscaler.upscale(imgDataUrl, {
-                    patchSize: 128, // 4x 模型计算量大，用更小的 patch 防止内存溢出
-                    padding: 2,
                     onProgress: (pct) => setProgress(pct * 100)
                 });
                 clearInterval(progressInterval);
@@ -304,7 +300,7 @@
         });
 
         resetUI();
-        setStatus('就绪，请选择一张图片 (4x 放大)');
+        setStatus('就绪，请选择一张图片 (4x 放大，整图处理)');
     })();
 </script>
 </body>
