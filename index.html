@@ -4,6 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>图片清晰化工具</title>
+    <!-- 引入 Eruda 手机调试工具 -->
+    <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+    <script>eruda.init();</script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -131,7 +134,7 @@
         <button class="btn btn-success" id="downloadBtn" disabled>⬇️ 下载结果</button>
     </div>
     <div class="status-msg" id="statusMsg">就绪，请选择一张图片</div>
-    <div class="footer">模型在线加载 · 首次约20秒</div>
+    <div class="footer">模型在线加载 · 首次约30秒</div>
 </div>
 <script src="upscaler.min.js"></script>
 <script>
@@ -185,7 +188,7 @@
             downloadBtn.disabled = true;
             progressWrap.style.display = 'block';
             setProgress(0);
-            setStatus('正在加载模型（首次约20秒）并增强...');
+            setStatus('正在加载模型（首次约30秒）并增强...');
             try {
                 const imgDataUrl = await new Promise((resolve, reject) => {
                     const reader = new FileReader();
@@ -193,9 +196,11 @@
                     reader.onerror = () => reject(new Error('读取图片失败'));
                     reader.readAsDataURL(currentFile);
                 });
+                // 使用代理链接，解决跨域和国内访问问题
                 const upscaler = new Upscaler({
-                    model: 'https://huggingface.co/lxfater/inpaint-web/resolve/main/realesrgan-x4.onnx',
+                    model: 'https://worker-share-proxy-01f5.lxfater.workers.dev/lxfater/inpaint-web/resolve/main/realesrgan-x4.onnx',
                     modelType: 'onnx',
+                    timeout: 120000 // 120秒超时，避免手机慢导致失败
                 });
                 let progressValue = 0;
                 const progressInterval = setInterval(() => {
@@ -212,7 +217,7 @@
                 downloadBtn.disabled = false;
                 setStatus('✅ 增强完成！点击下载');
             } catch (err) {
-                console.error(err);
+                console.error('详细错误:', err);
                 setStatus('❌ 失败: ' + (err.message || '未知错误'), true);
                 progressWrap.style.display = 'none';
             } finally {
