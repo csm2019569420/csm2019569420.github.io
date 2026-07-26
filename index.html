@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>4倍图片清晰化</title>
+    <title>图片清晰化工具</title>
     <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
     <script>eruda.init();</script>
     <style>
@@ -27,7 +27,12 @@
             text-align: center;
         }
         h1 { font-size: 24px; font-weight: 700; color: #1a1a2e; margin-bottom: 6px; }
-        .sub { color: #888; font-size: 14px; margin-bottom: 24px; }
+        .sub { color: #888; font-size: 14px; margin-bottom: 12px; }
+        .warn-tip{
+            color:#e64340;
+            font-size:13px;
+            margin-bottom:20px;
+        }
         .upload-area {
             border: 2px dashed #d0d7e3;
             border-radius: 16px;
@@ -113,11 +118,12 @@
 <body>
 <div class="container">
     <h1>✨ 4倍图片清晰化</h1>
-    <p class="sub">AI ESRGAN · 4x放大（优化移动端稳定性）</p>
+    <p class="sub">AI ESRGAN · 4x放大</p>
+    <p class="warn-tip">⚠️手机硬件限制，极易显存不足卡死！手机建议使用2倍版本，电脑运行4倍效果最佳</p>
     <div class="upload-area" id="uploadArea">
         <span class="icon">🖼️</span>
         <p><strong>点击选择图片</strong></p>
-        <span class="hint">手机优先使用长边 ≤800 的图片</span>
+        <span class="hint">图片长边尽量≤700px，越大越容易失败</span>
     </div>
     <input type="file" id="fileInput" accept="image/*" />
     <div class="preview-box" id="previewBox">
@@ -133,7 +139,7 @@
         <button class="btn btn-success" id="downloadBtn" disabled>⬇️ 下载结果</button>
     </div>
     <div class="status-msg" id="statusMsg">就绪，请选择一张图片</div>
-    <div class="footer">模型在线加载 · CPU模式极易卡顿，尽量保证GPU运行</div>
+    <div class="footer">模型在线加载 · GPU失败将直接终止，不再尝试CPU模式</div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
@@ -169,7 +175,6 @@
             setProgress(0);
         }
 
-        // 图片压缩工具
         function compressImage(file, maxSize) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
@@ -193,7 +198,6 @@
                         canvas.toBlob((blob) => {
                             if (!blob) reject(new Error('压缩失败'));
                             const compressedFile = new File([blob], file.name, { type: file.type });
-                            console.log('压缩尺寸', newWidth, newHeight);
                             resolve(compressedFile);
                         }, file.type, 0.92);
                     };
@@ -210,9 +214,9 @@
             const file = this.files && this.files[0];
             if (!file) return;
             try {
-                setStatus('加载图片...');
-                // 正常GPU模式上限1000px
-                const compressedFile = await compressImage(file, 1000);
+                setStatus('加载并调整图片尺寸');
+                // 4倍模式强制上限700px长边
+                const compressedFile = await compressImage(file, 700);
                 if (originalUrl) URL.revokeObjectURL(originalUrl);
                 currentFile = compressedFile;
                 originalUrl = URL.createObjectURL(compressedFile);
@@ -220,7 +224,7 @@
                 previewBox.style.display = 'block';
                 resetUI();
                 upscaleBtn.disabled = false;
-                setStatus('已加载图片：' + file.name);
+                setStatus('图片加载完成，可开始增强');
             } catch (err) {
                 setStatus('图片加载失败', true);
             }
@@ -232,48 +236,28 @@
             downloadBtn.disabled = true;
             progressWrap.style.display = 'block';
             setProgress(0);
-            setStatus('开始GPU模式4倍增强');
+            setStatus('GPU运算中，请不要锁屏、切后台！');
 
             try {
                 const reader = new FileReader();
                 reader.readAsDataURL(currentFile);
                 const imgDataUrl = await new Promise(resolve => reader.onload = e=>resolve(e.target.result));
                 const upscaler = new Upscaler({model: ESRGANSlim4x});
-                // GPU模式参数
+                // 极小分块，降低单次GPU负载
                 const output = await upscaler.upscale(imgDataUrl, {
-                    patchSize:96,
-                    padding:3,
+                    patchSize:64,
+                    padding:2,
                     onProgress:p=>setProgress(p*100)
                 });
                 setProgress(100);
                 resultDataUrl = output;
                 downloadBtn.disabled = false;
-                setStatus('✅ 增强完成，点击下载');
+                setStatus('✅ 4倍增强完成！');
             } catch (err) {
-                console.log('GPU失败，切换CPU',err);
-                setStatus('GPU内存不足，切换CPU模式，正在二次缩小图片');
-                try{
-                    // CPU模式强制缩小到长边800以内，降低运算压力
-                    const cpuFile = await compressImage(currentFile,800);
-                    const reader = new FileReader();
-                    reader.readAsDataURL(cpuFile);
-                    const imgDataUrl = await new Promise(resolve => reader.onload = e=>resolve(e.target.result));
-                    await tf.setBackend('cpu');
-                    await tf.ready();
-                    const upscaler = new Upscaler({model: ESRGANSlim4x});
-                    const output = await upscaler.upscale(imgDataUrl, {
-                        patchSize:80,
-                        padding:2,
-                        onProgress:p=>setProgress(p*100)
-                    });
-                    setProgress(100);
-                    resultDataUrl = output;
-                    downloadBtn.disabled = false;
-                    setStatus('✅ CPU模式处理完成');
-                }catch(err2){
-                    setStatus('❌ CPU模式依然失败！请更换更小图片，或者使用电脑打开',true);
-                    progressWrap.style.display = 'none';
-                }
+                console.error('GPU运算失败：',err);
+                // 【重大改动】不再自动切换CPU，直接终止！避免卡死手机
+                setStatus('❌ GPU显存不足！无法继续。手机请尝试2倍版本，或者使用电脑操作', true);
+                progressWrap.style.display = 'none';
             } finally {
                 upscaleBtn.disabled = false;
             }
@@ -286,7 +270,7 @@
             a.href = resultDataUrl;
             a.download = baseName + '_4x.png';
             a.click();
-            setStatus('下载已触发');
+            setStatus('开始下载图片');
         });
         resetUI();
     })();
