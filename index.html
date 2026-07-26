@@ -136,7 +136,14 @@
     <div class="status-msg" id="statusMsg">就绪，请选择一张图片</div>
     <div class="footer">模型在线加载 · 首次约20秒</div>
 </div>
-<script src="upscaler.min.js"></script>
+
+<!-- ====== 关键修改：先加载 TensorFlow.js ====== -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+<!-- ====== 再加载默认模型（提供 DefaultUpscalerJSModel 对象） ====== -->
+<script src="https://cdn.jsdelivr.net/npm/@upscalerjs/default-model@latest/dist/umd/index.min.js"></script>
+<!-- ====== 最后加载 UpscalerJS 核心库 ====== -->
+<script src="https://cdn.jsdelivr.net/npm/upscaler@latest/dist/browser/umd/upscaler.min.js"></script>
+
 <script>
     (function() {
         const fileInput = document.getElementById('fileInput');
@@ -181,7 +188,11 @@
         upscaleBtn.addEventListener('click', async function() {
             if (!currentFile) { setStatus('请先选择一张图片', true); return; }
             if (typeof Upscaler === 'undefined') {
-                setStatus('错误：库未加载，请检查 upscaler.min.js 是否存在', true);
+                setStatus('错误：UpscalerJS 库未加载', true);
+                return;
+            }
+            if (typeof DefaultUpscalerJSModel === 'undefined') {
+                setStatus('错误：默认模型未加载，请检查网络', true);
                 return;
             }
             upscaleBtn.disabled = true;
@@ -196,11 +207,12 @@
                     reader.onerror = () => reject(new Error('读取图片失败'));
                     reader.readAsDataURL(currentFile);
                 });
-                // ===== 关键改动：使用官方模型配置文件（支持2x放大） =====
-                const upscaler = new Upscaler({
-                    model: 'https://cdn.jsdelivr.net/npm/@upscalerjs/default-model@1.0.0-beta.17/models/model.json',
+                
+                // ===== 关键修改：直接使用已加载好的模型对象 =====
+                const upscaler = new Upscaler({ 
+                    model: DefaultUpscalerJSModel 
                 });
-                // =====================================================
+                
                 let progressValue = 0;
                 const progressInterval = setInterval(() => {
                     progressValue += Math.random() * 6 + 1;
