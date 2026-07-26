@@ -34,7 +34,245 @@
             margin-bottom: 28px;
             font-size: 0.95rem;
         }
-        .upload-area {
+        /* 关键修复：用 label 替代 div，保证兼容性 */
+        .upload-label {
+            display: block;
+            border: 2px dashed #d0d7de;
+            border-radius: 20px;
+            padding: 40px 20px;
+            margin-bottom: 20px;
+            background: #fafbfc;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .upload-label:active {
+            border-color: #7c8aff;
+            background: #f0f2ff;
+        }
+        .upload-label input {
+            display: none;
+        }
+        .upload-icon {
+            font-size: 2.5rem;
+            margin-bottom: 12px;
+        }
+        .preview-img {
+            max-width: 100%;
+            max-height: 280px;
+            border-radius: 16px;
+            display: none;
+            margin: 0 auto 20px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.1);
+        }
+        .progress-container {
+            display: none;
+            margin: 20px 0;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, #7c8aff, #4a5de0);
+            transition: width 0.3s;
+            border-radius: 4px;
+        }
+        .progress-text {
+            margin-top: 8px;
+            color: #555;
+            font-size: 0.9rem;
+        }
+        .result-area {
+            display: none;
+            margin-top: 20px;
+        }
+        .btn {
+            background: #4a5de0;
+            color: white;
+            border: none;
+            padding: 14px 28px;
+            border-radius: 50px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.2s;
+            width: 100%;
+            margin-top: 8px;
+        }
+        .btn-download {
+            background: #fff;
+            color: #4a5de0;
+            border: 1.5px solid #4a5de0;
+        }
+        .btn-download:active {
+            background: #f0f3ff;
+        }
+        .btn:active {
+            opacity: 0.9;
+        }
+        .note {
+            margin-top: 24px;
+            font-size: 0.8rem;
+            color: #999;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🖼️ 图片变清晰</h1>
+        <div class="subtitle">本地处理 · 无需上传 · 完全免费</div>
+
+        <!-- 核心修复：用 label 包裹 input，彻底解决弹窗问题 -->
+        <label class="upload-label" for="fileInput">
+            <div class="upload-icon">📷</div>
+            <div>点击选择图片</div>
+            <input type="file" id="fileInput" accept="image/*">
+        </label>
+
+        <!-- 预览原图 -->
+        <img id="preview" class="preview-img" alt="原图预览">
+
+        <!-- 处理按钮 -->
+        <button class="btn" id="processBtn" style="display: none;">✨ 开始变清晰</button>
+
+        <!-- 进度条 -->
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="progress-text" id="progressText">正在加载模型...</div>
+        </div>
+
+        <!-- 结果区域 -->
+        <div class="result-area" id="resultArea">
+            <img id="resultImg" class="preview-img" alt="清晰结果" style="display: block;">
+            <button class="btn btn-download" id="downloadBtn">💾 下载清晰图片</button>
+            <button class="btn" id="newImageBtn" style="margin-top: 12px;">🔄 处理另一张</button>
+        </div>
+
+        <div class="note">
+            ⚡ 使用 Real-ESRGAN 模型<br>
+            🔒 所有处理均在您的手机/电脑本地完成<br>
+            📶 首次加载模型可能需要几秒，后续会更快
+        </div>
+    </div>
+
+    <!-- 引入 upscalerjs 库 -->
+    <script src="https://cdn.jsdelivr.net/npm/upscalerjs@latest/dist/umd/index.min.js"></script>
+    <script>
+        (function() {
+            const fileInput = document.getElementById('fileInput');
+            const preview = document.getElementById('preview');
+            const processBtn = document.getElementById('processBtn');
+            const progressContainer = document.getElementById('progressContainer');
+            const progressFill = document.getElementById('progressFill');
+            const progressText = document.getElementById('progressText');
+            const resultArea = document.getElementById('resultArea');
+            const resultImg = document.getElementById('resultImg');
+            const downloadBtn = document.getElementById('downloadBtn');
+            const newImageBtn = document.getElementById('newImageBtn');
+
+            let originalImage = null;
+
+            // 初始化 upscaler
+            const upscaler = new Upscaler({
+                model: 'realesrgan',
+            });
+
+            // 文件选择后的处理
+            fileInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    originalImage = new Image();
+                    originalImage.src = event.target.result;
+                    originalImage.onload = () => {
+                        preview.src = event.target.result;
+                        preview.style.display = 'block';
+                        processBtn.style.display = 'block';
+                        resultArea.style.display = 'none';
+                        progressContainer.style.display = 'none';
+                    };
+                };
+                reader.readAsDataURL(file);
+            });
+
+            // 开始处理
+            processBtn.addEventListener('click', async () => {
+                if (!originalImage) return;
+                
+                processBtn.style.display = 'none';
+                progressContainer.style.display = 'block';
+                progressFill.style.width = '10%';
+                progressText.textContent = '正在加载模型（首次较慢）...';
+
+                try {
+                    let progress = 10;
+                    const interval = setInterval(() => {
+                        if (progress < 90) {
+                            progress += Math.random() * 10;
+                            progressFill.style.width = Math.min(progress, 90) + '%';
+                            if (progress > 50) {
+                                progressText.textContent = '正在处理图片...';
+                            }
+                        }
+                    }, 500);
+
+                    const upscaledImg = await upscaler.upscale(originalImage, {
+                        patchSize: 64,
+                        padding: 6,
+                        progress: (amount) => {
+                            progress = 20 + amount * 70;
+                            progressFill.style.width = progress + '%';
+                            if (amount > 0.8) {
+                                progressText.textContent = '即将完成...';
+                            }
+                        }
+                    });
+
+                    clearInterval(interval);
+                    progressFill.style.width = '100%';
+                    progressText.textContent = '处理完成！';
+                    
+                    resultImg.src = upscaledImg.src;
+                    resultArea.style.display = 'block';
+                    progressContainer.style.display = 'none';
+
+                    downloadBtn.onclick = () => {
+                        const a = document.createElement('a');
+                        a.href = upscaledImg.src;
+                        a.download = '高清_' + Date.now() + '.png';
+                        a.click();
+                    };
+
+                } catch (error) {
+                    progressText.textContent = '出错啦：' + error.message;
+                    console.error(error);
+                    processBtn.style.display = 'block';
+                }
+            });
+
+            // 处理新图片
+            newImageBtn.addEventListener('click', () => {
+                originalImage = null;
+                fileInput.value = '';
+                preview.style.display = 'none';
+                resultArea.style.display = 'none';
+                processBtn.style.display = 'none';
+                progressContainer.style.display = 'none';
+            });
+        })();
+    </script>
+</body>
+</html>        .upload-area {
             border: 2px dashed #d0d7de;
             border-radius: 20px;
             padding: 40px 20px;
