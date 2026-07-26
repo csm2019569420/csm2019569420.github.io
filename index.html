@@ -113,11 +113,11 @@
 <body>
 <div class="container">
     <h1>✨ 4倍图片清晰化</h1>
-    <p class="sub">AI ESRGAN · 4x放大（分块运算，兼顾画质与稳定）</p>
+    <p class="sub">AI ESRGAN · 4x放大（优化移动端稳定性）</p>
     <div class="upload-area" id="uploadArea">
         <span class="icon">🖼️</span>
         <p><strong>点击选择图片</strong></p>
-        <span class="hint">支持 JPG / PNG / WebP</span>
+        <span class="hint">手机优先使用长边 ≤800 的图片</span>
     </div>
     <input type="file" id="fileInput" accept="image/*" />
     <div class="preview-box" id="previewBox">
@@ -133,10 +133,9 @@
         <button class="btn btn-success" id="downloadBtn" disabled>⬇️ 下载结果</button>
     </div>
     <div class="status-msg" id="statusMsg">就绪，请选择一张图片</div>
-    <div class="footer">模型在线加载 · 手机推荐中小尺寸图片</div>
+    <div class="footer">模型在线加载 · CPU模式极易卡顿，尽量保证GPU运行</div>
 </div>
 
-<!-- 依赖库 -->
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@upscalerjs/esrgan-slim@latest/dist/umd/4x.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/upscaler@latest/dist/browser/umd/upscaler.min.js"></script>
@@ -170,8 +169,8 @@
             setProgress(0);
         }
 
-        // 压缩函数：阈值放宽至1000px，优先保留原图清晰度，不盲目缩小
-        function compressImage(file, maxSize = 1000) {
+        // 图片压缩工具
+        function compressImage(file, maxSize) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onload = (e) => {
@@ -179,14 +178,13 @@
                     img.onload = () => {
                         let width = img.width;
                         let height = img.height;
-                        // 小于阈值，直接返回原图，不压缩！保护画质
                         if (width <= maxSize && height <= maxSize) {
                             resolve(file);
                             return;
                         }
-                        let scale = Math.min(maxSize / width, maxSize / height);
-                        let newWidth = Math.floor(width * scale);
-                        let newHeight = Math.floor(height * scale);
+                        const scale = Math.min(maxSize / width, maxSize / height);
+                        const newWidth = Math.floor(width * scale);
+                        const newHeight = Math.floor(height * scale);
                         const canvas = document.createElement('canvas');
                         canvas.width = newWidth;
                         canvas.height = newHeight;
@@ -195,7 +193,7 @@
                         canvas.toBlob((blob) => {
                             if (!blob) reject(new Error('压缩失败'));
                             const compressedFile = new File([blob], file.name, { type: file.type });
-                            console.log('压缩后尺寸:', newWidth, 'x', newHeight);
+                            console.log('压缩尺寸', newWidth, newHeight);
                             resolve(compressedFile);
                         }, file.type, 0.92);
                     };
@@ -208,18 +206,13 @@
         }
 
         uploadArea.addEventListener('click', () => fileInput.click());
-
         fileInput.addEventListener('change', async function(e) {
             const file = this.files && this.files[0];
             if (!file) return;
             try {
-                setStatus('正在加载图片，按需压缩...');
+                setStatus('加载图片...');
+                // 正常GPU模式上限1000px
                 const compressedFile = await compressImage(file, 1000);
-                if (compressedFile !== file) {
-                    setStatus('图片尺寸较大，已适度缩小保障稳定运行');
-                } else {
-                    setStatus('原图尺寸合适，保留全部原始细节');
-                }
                 if (originalUrl) URL.revokeObjectURL(originalUrl);
                 currentFile = compressedFile;
                 originalUrl = URL.createObjectURL(compressedFile);
@@ -227,93 +220,58 @@
                 previewBox.style.display = 'block';
                 resetUI();
                 upscaleBtn.disabled = false;
-                setStatus('已加载: ' + file.name);
+                setStatus('已加载图片：' + file.name);
             } catch (err) {
-                console.error('压缩异常:', err);
-                setStatus('压缩失败: ' + (err.message || String(err)), true);
+                setStatus('图片加载失败', true);
             }
         });
 
         upscaleBtn.addEventListener('click', async function() {
-            if (!currentFile) { setStatus('请先选择一张图片', true); return; }
-            if (typeof Upscaler === 'undefined') {
-                setStatus('错误：UpscalerJS 库未加载', true);
-                return;
-            }
-            if (typeof ESRGANSlim4x === 'undefined') {
-                setStatus('错误：4x模型未加载，请刷新重试', true);
-                return;
-            }
+            if (!currentFile) return;
             upscaleBtn.disabled = true;
             downloadBtn.disabled = true;
             progressWrap.style.display = 'block';
             setProgress(0);
-            setStatus('正在加载4x模型并增强（分块GPU运算）...');
+            setStatus('开始GPU模式4倍增强');
 
             try {
-                const imgDataUrl = await new Promise((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onload = (e) => resolve(e.target.result);
-                    reader.onerror = () => reject(new Error('读取图片失败'));
-                    reader.readAsDataURL(currentFile);
+                const reader = new FileReader();
+                reader.readAsDataURL(currentFile);
+                const imgDataUrl = await new Promise(resolve => reader.onload = e=>resolve(e.target.result));
+                const upscaler = new Upscaler({model: ESRGANSlim4x});
+                // GPU模式参数
+                const output = await upscaler.upscale(imgDataUrl, {
+                    patchSize:96,
+                    padding:3,
+                    onProgress:p=>setProgress(p*100)
                 });
-
-                const upscaler = new Upscaler({
-                    model: ESRGANSlim4x
-                });
-
-                let progressValue = 0;
-                const progressInterval = setInterval(() => {
-                    progressValue += Math.random() * 4 + 0.5;
-                    if (progressValue > 95) progressValue = 95;
-                    setProgress(progressValue);
-                }, 200);
-
-                // ✅ 恢复分块处理！4倍推荐 patchSize:128，padding:4
-                const upscaledDataUrl = await upscaler.upscale(imgDataUrl, {
-                    patchSize: 128,
-                    padding: 4,
-                    onProgress: (pct) => setProgress(pct * 100)
-                });
-                clearInterval(progressInterval);
                 setProgress(100);
-                resultDataUrl = upscaledDataUrl;
+                resultDataUrl = output;
                 downloadBtn.disabled = false;
-                setStatus('✅ 4倍增强完成！点击下载');
+                setStatus('✅ 增强完成，点击下载');
             } catch (err) {
-                console.error('GPU模式失败，尝试切换CPU后端', err);
-                setStatus('GPU内存不足，切换CPU模式，速度较慢...');
-                try {
-                    // 自动降级至CPU兜底
+                console.log('GPU失败，切换CPU',err);
+                setStatus('GPU内存不足，切换CPU模式，正在二次缩小图片');
+                try{
+                    // CPU模式强制缩小到长边800以内，降低运算压力
+                    const cpuFile = await compressImage(currentFile,800);
+                    const reader = new FileReader();
+                    reader.readAsDataURL(cpuFile);
+                    const imgDataUrl = await new Promise(resolve => reader.onload = e=>resolve(e.target.result));
                     await tf.setBackend('cpu');
                     await tf.ready();
-
-                    const imgDataUrl = await new Promise((resolve, reject) => {
-                        const reader = new FileReader();
-                        reader.onload = (e) => resolve(e.target.result);
-                        reader.onerror = () => reject(new Error('读取图片失败'));
-                        reader.readAsDataURL(currentFile);
-                    });
                     const upscaler = new Upscaler({model: ESRGANSlim4x});
-                    let progressValue = 0;
-                    const progressInterval = setInterval(() => {
-                        progressValue += Math.random() * 2 + 0.3;
-                        if (progressValue > 95) progressValue = 95;
-                        setProgress(progressValue);
-                    }, 300);
-                    const upscaledDataUrl = await upscaler.upscale(imgDataUrl, {
-                        patchSize:128,
-                        padding:4,
-                        onProgress: (pct) => setProgress(pct * 100)
+                    const output = await upscaler.upscale(imgDataUrl, {
+                        patchSize:80,
+                        padding:2,
+                        onProgress:p=>setProgress(p*100)
                     });
-                    clearInterval(progressInterval);
                     setProgress(100);
-                    resultDataUrl = upscaledDataUrl;
+                    resultDataUrl = output;
                     downloadBtn.disabled = false;
-                    setStatus('✅ CPU模式增强完成！点击下载');
+                    setStatus('✅ CPU模式处理完成');
                 }catch(err2){
-                    console.error("CPU模式仍然失败",err2);
-                    setStatus('❌ 处理失败，尝试更换更小尺寸图片', true);
+                    setStatus('❌ CPU模式依然失败！请更换更小图片，或者使用电脑打开',true);
                     progressWrap.style.display = 'none';
                 }
             } finally {
@@ -322,19 +280,15 @@
         });
 
         downloadBtn.addEventListener('click', function() {
-            if (!resultDataUrl) { setStatus('没有结果', true); return; }
-            const baseName = currentFile ? currentFile.name.replace(/\.[^.]+$/, '') : 'enhanced';
-            const link = document.createElement('a');
-            link.href = resultDataUrl;
-            link.download = baseName + '_4x.png';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            setStatus('⬇️ 下载已开始');
+            if (!resultDataUrl) return;
+            const baseName = currentFile ? currentFile.name.replace(/\.[^.]+$/,'') : 'enhanced';
+            const a = document.createElement('a');
+            a.href = resultDataUrl;
+            a.download = baseName + '_4x.png';
+            a.click();
+            setStatus('下载已触发');
         });
-
         resetUI();
-        setStatus('就绪，请选择一张图片');
     })();
 </script>
 </body>
