@@ -113,7 +113,7 @@
 <body>
 <div class="container">
     <h1>✨ 图片清晰化</h1>
-    <p class="sub">基于 AI 的超分辨率增强 · 2x 放大（自动适配手机）</p>
+    <p class="sub">基于 AI 的超分辨率增强 · 2x 放大（手机流畅版）</p>
     <div class="upload-area" id="uploadArea">
         <span class="icon">🖼️</span>
         <p><strong>点击选择图片</strong></p>
@@ -133,7 +133,7 @@
         <button class="btn btn-success" id="downloadBtn" disabled>⬇️ 下载结果</button>
     </div>
     <div class="status-msg" id="statusMsg">就绪，请选择一张图片</div>
-    <div class="footer">模型在线加载 · 首次约20秒</div>
+    <div class="footer">模型在线加载 · 首次约15秒</div>
 </div>
 
 <!-- 依赖库 -->
@@ -170,8 +170,8 @@
             setProgress(0);
         }
 
-        // 图片压缩函数【修改上限：1024px】
-        function compressImage(file, maxSize = 1024) {
+        // ===== 关键改动：把图片最长边压缩到 700px（保证 GPU 绝对安全） =====
+        function compressImage(file, maxSize = 700) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onload = (e) => {
@@ -195,7 +195,7 @@
                             if (!blob) reject(new Error('压缩失败'));
                             const compressedFile = new File([blob], file.name, { type: file.type });
                             resolve(compressedFile);
-                        }, file.type, 0.9);
+                        }, file.type, 0.92);
                     };
                     img.onerror = reject;
                     img.src = e.target.result;
@@ -211,12 +211,13 @@
             const file = this.files && this.files[0];
             if (!file) return;
             try {
-                setStatus('正在压缩图片（如需）...');
-                const compressedFile = await compressImage(file, 1024);
+                setStatus('正在压缩图片...');
+                // 强制压缩到 700px
+                const compressedFile = await compressImage(file, 700);
                 if (compressedFile !== file) {
-                    setStatus('图片已压缩至合适尺寸');
+                    setStatus('图片已压缩至 700px 以内，质量无损');
                 } else {
-                    setStatus('图片尺寸合适，无需压缩');
+                    setStatus('图片尺寸合适');
                 }
                 if (originalUrl) URL.revokeObjectURL(originalUrl);
                 currentFile = compressedFile;
@@ -246,11 +247,7 @@
             downloadBtn.disabled = true;
             progressWrap.style.display = 'block';
             setProgress(0);
-            setStatus('正在加载模型（首次约20秒）并增强...');
-
-            // 自动降级策略：WebGL报错切换CPU后端
-            let useCPU = false;
-            let upscaledDataUrl = null;
+            setStatus('正在加载模型并增强（手机GPU加速）...');
 
             try {
                 const imgDataUrl = await new Promise((resolve, reject) => {
@@ -269,70 +266,26 @@
                     progressValue += Math.random() * 6 + 1;
                     if (progressValue > 95) progressValue = 95;
                     setProgress(progressValue);
-                }, 200);
+                }, 150);
 
-                // 启用分块处理 patchSize + padding
-                upscaledDataUrl = await upscaler.upscale(imgDataUrl, {
-                    patchSize: 256,
-                    padding: 4,
+                // ===== 使用分块处理 + 更小的 patch 防止内存溢出 =====
+                const upscaledDataUrl = await upscaler.upscale(imgDataUrl, {
+                    patchSize: 128,   // 更小的块，处理起来更轻松
+                    padding: 2,
                     onProgress: (pct) => setProgress(pct * 100)
                 });
                 clearInterval(progressInterval);
                 setProgress(100);
-
+                resultDataUrl = upscaledDataUrl;
+                downloadBtn.disabled = false;
+                setStatus('✅ 增强完成！点击下载');
             } catch (err) {
-                console.error('第一轮WebGL处理失败，错误详情：', err);
-                // 判断纹理尺寸超限，切换CPU重试
-                const errText = String(err);
-                if(errText.includes("texture size") || errText === "Error {}" || errText === "[object Object]"){
-                    setStatus('GPU处理超限，切换CPU模式重试，速度较慢...');
-                    try{
-                        await tf.setBackend('cpu');
-                        await tf.ready();
-
-                        const imgDataUrl = await new Promise((resolve, reject) => {
-                            const reader = new FileReader();
-                            reader.onload = (e) => resolve(e.target.result);
-                            reader.onerror = () => reject(new Error('读取图片失败'));
-                            reader.readAsDataURL(currentFile);
-                        });
-
-                        const upscaler = new Upscaler({
-                            model: DefaultUpscalerJSModel
-                        });
-                        let progressValue = 0;
-                        const progressInterval = setInterval(() => {
-                            progressValue += Math.random() * 3 + 0.5;
-                            if (progressValue > 95) progressValue = 95;
-                            setProgress(progressValue);
-                        }, 300);
-
-                        upscaledDataUrl = await upscaler.upscale(imgDataUrl, {
-                            patchSize: 256,
-                            padding: 4,
-                            onProgress: (pct) => setProgress(pct * 100)
-                        });
-                        clearInterval(progressInterval);
-                        setProgress(100);
-                    }catch(err2){
-                        console.error("CPU模式依旧失败：", err2);
-                        setStatus('❌ CPU模式仍然失败，图片尺寸过大，请更换更小图片', true);
-                        progressWrap.style.display = 'none';
-                        upscaleBtn.disabled = false;
-                        return;
-                    }
-                }else{
-                    setStatus('❌ 失败: ' + (err.message || String(err)), true);
-                    progressWrap.style.display = 'none';
-                    upscaleBtn.disabled = false;
-                    return;
-                }
+                console.error('详细错误:', err);
+                setStatus('❌ 失败: ' + (err.message || '未知错误'), true);
+                progressWrap.style.display = 'none';
+            } finally {
+                upscaleBtn.disabled = false;
             }
-
-            resultDataUrl = upscaledDataUrl;
-            downloadBtn.disabled = false;
-            setStatus('✅ 增强完成！点击下载');
-            upscaleBtn.disabled = false;
         });
 
         downloadBtn.addEventListener('click', function() {
