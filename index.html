@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>图片清晰化工具</title>
+    <title>4倍图片清晰化工具</title>
     <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
     <script>eruda.init();</script>
     <style>
@@ -112,8 +112,8 @@
 </head>
 <body>
 <div class="container">
-    <h1>✨ 图片清晰化</h1>
-    <p class="sub">基于 AI 的超分辨率增强 · 2x 放大（手机流畅版）</p>
+    <h1>✨ 4倍图片清晰化</h1>
+    <p class="sub">基于 AI 的超分辨率增强 · 4x 放大（手机优化版）</p>
     <div class="upload-area" id="uploadArea">
         <span class="icon">🖼️</span>
         <p><strong>点击选择图片</strong></p>
@@ -129,16 +129,18 @@
         <div class="progress-text" id="progressText">0%</div>
     </div>
     <div class="btn-group">
-        <button class="btn btn-primary" id="upscaleBtn" disabled>🚀 开始增强</button>
+        <button class="btn btn-primary" id="upscaleBtn" disabled>🚀 开始4倍增强</button>
         <button class="btn btn-success" id="downloadBtn" disabled>⬇️ 下载结果</button>
     </div>
     <div class="status-msg" id="statusMsg">就绪，请选择一张图片</div>
-    <div class="footer">模型在线加载 · 首次约15秒</div>
+    <div class="footer">模型在线加载 · 首次约15-30秒</div>
 </div>
 
-<!-- 依赖库 -->
+<!-- 1. TensorFlow.js 核心库 -->
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@upscalerjs/default-model@latest/dist/umd/index.min.js"></script>
+<!-- 2. ESRGAN Slim 4x 模型 (通过 script 标签加载, 会暴露全局对象 ESRGANSlim4x) -->
+<script src="https://cdn.jsdelivr.net/npm/@upscalerjs/esrgan-slim@latest/dist/umd/4x.min.js"></script>
+<!-- 3. UpscalerJS 核心库 -->
 <script src="https://cdn.jsdelivr.net/npm/upscaler@latest/dist/browser/umd/upscaler.min.js"></script>
 
 <script>
@@ -170,8 +172,8 @@
             setProgress(0);
         }
 
-        // 图片压缩：最长边限制1200px
-        function compressImage(file, maxSize = 1200) {
+        // ===== 4倍模型下，压缩到 800px 以确保最终尺寸 (800*4=3200) 不超 GPU 限制 =====
+        function compressImage(file, maxSize = 800) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onload = (e) => {
@@ -194,6 +196,7 @@
                         canvas.toBlob((blob) => {
                             if (!blob) reject(new Error('压缩失败'));
                             const compressedFile = new File([blob], file.name, { type: file.type });
+                            console.log('4x模式压缩后尺寸:', newWidth, 'x', newHeight);
                             resolve(compressedFile);
                         }, file.type, 0.92);
                     };
@@ -212,11 +215,11 @@
             if (!file) return;
             try {
                 setStatus('正在压缩图片...');
-                const compressedFile = await compressImage(file, 1200);
+                const compressedFile = await compressImage(file, 800);
                 if (compressedFile !== file) {
-                    setStatus('图片已压缩至1200px以内');
+                    setStatus('✅ 图片已压缩至800px以内 (4x安全)');
                 } else {
-                    setStatus('图片尺寸合适');
+                    setStatus('图片尺寸小于800px，可直接4x放大');
                 }
                 if (originalUrl) URL.revokeObjectURL(originalUrl);
                 currentFile = compressedFile;
@@ -238,15 +241,16 @@
                 setStatus('错误：UpscalerJS 库未加载', true);
                 return;
             }
-            if (typeof DefaultUpscalerJSModel === 'undefined') {
-                setStatus('错误：默认模型未加载', true);
+            // 检查 4x 模型是否加载成功 (ESRGANSlim4x)
+            if (typeof ESRGANSlim4x === 'undefined') {
+                setStatus('错误：4x模型未加载，请刷新重试', true);
                 return;
             }
             upscaleBtn.disabled = true;
             downloadBtn.disabled = true;
             progressWrap.style.display = 'block';
             setProgress(0);
-            setStatus('正在加载模型并增强（手机GPU加速）...');
+            setStatus('正在加载4x模型并增强（手机GPU加速）...');
 
             try {
                 const imgDataUrl = await new Promise((resolve, reject) => {
@@ -256,28 +260,28 @@
                     reader.readAsDataURL(currentFile);
                 });
 
+                // ===== 关键改动：使用 ESRGAN Slim 4x 模型 =====
                 const upscaler = new Upscaler({
-                    model: DefaultUpscalerJSModel
+                    model: ESRGANSlim4x // 直接使用 script 标签加载好的 4x 模型对象[reference:10]
                 });
 
                 let progressValue = 0;
                 const progressInterval = setInterval(() => {
-                    progressValue += Math.random() * 6 + 1;
+                    progressValue += Math.random() * 4 + 0.5;
                     if (progressValue > 95) progressValue = 95;
                     setProgress(progressValue);
-                }, 150);
+                }, 200);
 
-                // 分块参数：patchSize256 + padding4，画质最优
                 const upscaledDataUrl = await upscaler.upscale(imgDataUrl, {
-                    patchSize: 256,
-                    padding: 4,
+                    patchSize: 128, // 4x 模型计算量大，用更小的 patch 防止内存溢出
+                    padding: 2,
                     onProgress: (pct) => setProgress(pct * 100)
                 });
                 clearInterval(progressInterval);
                 setProgress(100);
                 resultDataUrl = upscaledDataUrl;
                 downloadBtn.disabled = false;
-                setStatus('✅ 增强完成！点击下载');
+                setStatus('✅ 4倍增强完成！点击下载');
             } catch (err) {
                 console.error('详细错误:', err);
                 setStatus('❌ 失败: ' + (err.message || '未知错误'), true);
@@ -292,7 +296,7 @@
             const baseName = currentFile ? currentFile.name.replace(/\.[^.]+$/, '') : 'enhanced';
             const link = document.createElement('a');
             link.href = resultDataUrl;
-            link.download = baseName + '_2x.png';
+            link.download = baseName + '_4x.png';
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -300,7 +304,7 @@
         });
 
         resetUI();
-        setStatus('就绪，请选择一张图片');
+        setStatus('就绪，请选择一张图片 (4x 放大)');
     })();
 </script>
 </body>
