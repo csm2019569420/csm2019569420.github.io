@@ -170,8 +170,8 @@
             setProgress(0);
         }
 
-        // ===== 关键改动：把图片最长边压缩到 700px（保证 GPU 绝对安全） =====
-        function compressImage(file, maxSize = 700) {
+        // 图片压缩：最长边限制1200px
+        function compressImage(file, maxSize = 1200) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onload = (e) => {
@@ -212,10 +212,9 @@
             if (!file) return;
             try {
                 setStatus('正在压缩图片...');
-                // 强制压缩到 700px
-                const compressedFile = await compressImage(file, 700);
+                const compressedFile = await compressImage(file, 1200);
                 if (compressedFile !== file) {
-                    setStatus('图片已压缩至 700px 以内，质量无损');
+                    setStatus('图片已压缩至1200px以内');
                 } else {
                     setStatus('图片尺寸合适');
                 }
@@ -268,10 +267,10 @@
                     setProgress(progressValue);
                 }, 150);
 
-                // ===== 使用分块处理 + 更小的 patch 防止内存溢出 =====
+                // 分块参数：patchSize256 + padding4，画质最优
                 const upscaledDataUrl = await upscaler.upscale(imgDataUrl, {
-                    patchSize: 128,   // 更小的块，处理起来更轻松
-                    padding: 2,
+                    patchSize: 256,
+                    padding: 4,
                     onProgress: (pct) => setProgress(pct * 100)
                 });
                 clearInterval(progressInterval);
